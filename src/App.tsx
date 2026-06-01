@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import {
   Section,
+  SectionLabel,
   Loop,
   StemType,
   Genre,
@@ -624,6 +625,120 @@ export default function App() {
     }
   };
 
+  const handleInjectAnalysisToSequencer = () => {
+    if (!analysisResult) return;
+
+    addLog(`Bridging V1 & V2: Injecting audio-DSP structural analysis into Sequencer layers...`);
+
+    // 1. Sync BPM
+    const rawBpm = Math.round(analysisResult.bpm);
+    if (rawBpm > 40 && rawBpm < 250) {
+      setBpm(rawBpm);
+    }
+
+    // 2. Map structural sections proportionally to 32 sequencer bars
+    const duration = analysisResult.duration;
+    if (duration > 0 && analysisResult.section_boundaries.length > 0) {
+      let currentStartBar = 1;
+      const totalBars = 32;
+
+      const mappedSections: Section[] = analysisResult.section_boundaries.map((sb, idx) => {
+        const isLast = idx === analysisResult.section_boundaries.length - 1;
+        
+        // Calculate proportional bar allotment
+        const sectionSeconds = sb.end - sb.start;
+        const proportion = sectionSeconds / duration;
+        let barAllotment = Math.round(proportion * totalBars);
+
+        // Clamp section allotment to at least 2 bars to ensure usability
+        barAllotment = Math.max(2, barAllotment);
+
+        let endBar = currentStartBar + barAllotment - 1;
+
+        // Cover edge boundaries
+        if (isLast || endBar >= totalBars) {
+          endBar = totalBars;
+        }
+
+        if (endBar < currentStartBar) {
+          endBar = currentStartBar + 1;
+        }
+
+        // Map categories to recognized SectionLabels
+        let matchedLabel: SectionLabel = "Verse";
+        const rawLabel = sb.label.toLowerCase();
+        if (rawLabel.includes("intro")) matchedLabel = "Intro";
+        else if (rawLabel.includes("verse") || rawLabel.includes("part a")) matchedLabel = "Verse";
+        else if (rawLabel.includes("pre-hook") || rawLabel.includes("pre-chorus") || rawLabel.includes("build")) matchedLabel = "Pre-Hook";
+        else if (rawLabel.includes("hook") || rawLabel.includes("chorus") || rawLabel.includes("drop")) matchedLabel = "Hook";
+        else if (rawLabel.includes("bridge") || rawLabel.includes("middle")) matchedLabel = "Bridge";
+        else if (rawLabel.includes("outro") || rawLabel.includes("ending")) matchedLabel = "Outro";
+
+        const newSect: Section = {
+          id: `analysis-${idx}-${Math.random().toString(36).substring(2, 5)}`,
+          label: matchedLabel,
+          start: currentStartBar,
+          end: endBar
+        };
+
+        currentStartBar = endBar + 1;
+        return newSect;
+      });
+
+      // Ensure the last section perfectly ends at totalSeqBars
+      if (mappedSections.length > 0) {
+        mappedSections[mappedSections.length - 1].end = totalBars;
+      }
+
+      // 3. Map energy levels based on real RMS density
+      const finalEnergyLevels: Record<string, number> = {};
+      const finalAssignments: Record<string, string> = {};
+
+      mappedSections.forEach(section => {
+        const origIdx = mappedSections.indexOf(section);
+        const origSect = analysisResult.section_boundaries[origIdx];
+        let avgEnergy = 0.15; // default scale
+        
+        if (origSect) {
+          const filteredEnergyPoints = analysisResult.energy_profile.filter(
+            p => p.time >= origSect.start && p.time <= origSect.end
+          );
+          if (filteredEnergyPoints.length > 0) {
+            avgEnergy = filteredEnergyPoints.reduce((sum, p) => sum + p.value, 0) / filteredEnergyPoints.length;
+          }
+        }
+
+        // Map to 1..5 scale based on stretch coefficients
+        let energyCoefficient = Math.min(5, Math.max(1, Math.round(avgEnergy * 15)));
+
+        ["Full", "Drums", "Bass", "Melody"].forEach(stem => {
+          const key = `${section.id}-${stem}`;
+          let stemEnergy = energyCoefficient;
+          
+          if (stem === "Bass" && section.label === "Intro") stemEnergy = Math.max(1, energyCoefficient - 1);
+          if (stem === "Full" && section.label === "Outro") stemEnergy = Math.max(1, energyCoefficient - 2);
+
+          finalEnergyLevels[key] = stemEnergy;
+
+          // Auto-assign matching loop if available in pool
+          const matchingLoop = loops.find(l => l.type === stem);
+          if (matchingLoop) {
+            finalAssignments[key] = matchingLoop.id;
+          }
+        });
+      });
+
+      updateSequencerTab({
+        sections: mappedSections,
+        energyLevels: finalEnergyLevels,
+        assignments: finalAssignments
+      });
+
+      addLog(`Bridge verified: Synced ${mappedSections.length} structural milestones with custom automated energy profiles.`);
+      setActiveTab("sequencer");
+    }
+  };
+
   // -----------------------------------------------------------------
   // SEQUENCER ARRANGEMENT SEQUENCER HANDLERS (ARRANGEMENT ARCHITECT PRO)
   // -----------------------------------------------------------------
@@ -1105,6 +1220,13 @@ export default function App() {
                           className="flex items-center gap-1.5 bg-red-650/15 border border-red-500/20 hover:bg-red-650/25 hover:border-red-500 text-red-400 font-bold px-3 py-1.5 rounded-lg text-[9px] uppercase tracking-wider transition-all cursor-pointer shadow-md"
                         >
                           <Activity size={11} /> Export DAWProject
+                        </button>
+                        <button
+                          onClick={handleInjectAnalysisToSequencer}
+                          className="flex items-center gap-1.5 bg-purple-650/15 border border-purple-500/20 hover:bg-purple-650/25 hover:border-purple-500 text-purple-400 font-bold px-3 py-1.5 rounded-lg text-[9px] uppercase tracking-wider transition-all cursor-pointer shadow-md"
+                          title="Inject the analyzed structural metrics and BPM directly into the Sequencer workspace"
+                        >
+                          <Zap size={11} className="text-purple-450 animate-pulse" /> Apply to Sequencer
                         </button>
                       </div>
                     </div>
