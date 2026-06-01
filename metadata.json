@@ -1,0 +1,6 @@
+{
+  "name": "Loop Booth",
+  "description": "An interactive audio analyzer and multi-track loop arranger with MIDI export capabilities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
