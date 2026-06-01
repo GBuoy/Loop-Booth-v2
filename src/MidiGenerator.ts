@@ -28,6 +28,7 @@ export function generateStemMidis(
   const progression = CHORD_PROGRESSIONS[genre] || CHORD_PROGRESSIONS.Trap;
 
   const stems = [
+    { name: "FULL", channel: 2 },
     { name: "MELODY", channel: 0 },
     { name: "BASS", channel: 1 },
     { name: "DRUMS", channel: 9 }
@@ -52,7 +53,7 @@ export function generateStemMidis(
     for (const section of tab.sections) {
       const barsInSection = section.end - section.start + 1;
       const startBar = section.start - 1;
-      const energyKey = `${section.id}-${stem.name === "MELODY" ? "Melody" : stem.name === "BASS" ? "Bass" : "Drums"}`;
+      const energyKey = `${section.id}-${stem.name === "MELODY" ? "Melody" : stem.name === "BASS" ? "Bass" : stem.name === "FULL" ? "Full" : "Drums"}`;
       let energy = tab.energyLevels[energyKey] || 3;
       energy = Math.min(5, Math.max(1, energy));
 
@@ -72,6 +73,12 @@ export function generateStemMidis(
 
           let note = 60;
           let velocity = 60 + (energy * 8);
+
+          if (stem.name === "FULL") {
+            const index = step % chord.length;
+            note = chord[index];
+            velocity = 60 + (energy * 6);
+          }
 
           if (stem.name === "MELODY") {
             const chordNote = chord[Math.floor(Math.random() * chord.length)];
@@ -112,9 +119,10 @@ export function generateStemMidis(
           trackData.push(0x90 + stem.channel, note, Math.min(127, velocity));
 
           let duration = ppq / 4;
-          if (stem.name === "MELODY" && energy >= 4) duration = ppq / 2;
-          if (stem.name === "BASS" && energy >= 4) duration = ppq;
-          if (stem.name === "DRUMS") duration = ppq / 8;
+          if (stem.name === "FULL") duration = ppq * 2;
+          else if (stem.name === "MELODY" && energy >= 4) duration = ppq / 2;
+          else if (stem.name === "BASS" && energy >= 4) duration = ppq;
+          else if (stem.name === "DRUMS") duration = ppq / 8;
 
           const offDeltaBytes = encodeVarInt(duration);
           trackData.push(...offDeltaBytes);

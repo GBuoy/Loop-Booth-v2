@@ -34,12 +34,13 @@ export function ArrangementGrid({
   onToggleMute,
   totalBars
 }: ArrangementGridProps) {
-  const rows: StemType[] = ["Drums", "Bass", "Melody"];
+  const rows: StemType[] = ["Full", "Drums", "Bass", "Melody"];
   const [activeCellSelect, setActiveCellSelect] = React.useState<{ sid: string; row: string } | null>(null);
 
   const getEnergyColor = (row: string, energy: number, isMuted: boolean) => {
     if (isMuted) return "rgba(38, 38, 38, 0.9)";
     const colors: Record<string, string> = {
+      Full: "147, 51, 234",   // Deep Purple / Amethyste
       Drums: "220, 38, 38",  // Crimson Red
       Bass: "37, 99, 235",   // Sophisticated Royal Blue
       Melody: "5, 150, 105"  // Sophisticated Emerald Green
@@ -187,7 +188,7 @@ export function ArrangementGrid({
                                 onAssign(section.id, row, l.id);
                                 setActiveCellSelect(null);
                               }}
-                              className={`flex items-center justify-between text-[10px] px-2 py-1.5 rounded transition-colors text-left w-[#16161a] cursor-pointer hover:bg-white/5 ${assignedLoopId === l.id ? 'text-red-400 font-bold bg-red-950/20 border border-red-500/30' : 'text-neutral-250'}`}
+                              className={`flex items-center justify-between text-[10px] px-2 py-1.5 rounded transition-colors text-left w-full cursor-pointer hover:bg-white/5 ${assignedLoopId === l.id ? 'text-red-400 font-bold bg-red-950/20 border border-red-500/30' : 'text-neutral-250'}`}
                             >
                               <span className="truncate">{l.name}</span>
                               {assignedLoopId === l.id && <Check size={10} className="text-red-400" />}

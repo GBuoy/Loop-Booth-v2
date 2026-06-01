@@ -94,7 +94,7 @@ export function buildSequencerDAWProjectXML(
   });
 
   let tracksXML = "";
-  const stems = ["Drums", "Bass", "Melody"];
+  const stems = ["Full", "Drums", "Bass", "Melody"];
   stems.forEach((stem, trackIdx) => {
     let clipsXML = "";
     tab.sections.forEach((sec) => {
@@ -194,6 +194,20 @@ export async function compileSequencerDAWProject(
   // Root project definition
   const xmlContent = buildSequencerDAWProjectXML(tab, bpm, genre, totalBars);
   zip.file("project.xml", xmlContent);
+
+  // Bundle active session state JSON inside the ZIP archive
+  const brainJson = JSON.stringify({
+    editor_format: "LoopBooth Session Brain v1.2",
+    exported_at: new Date().toISOString(),
+    bpm,
+    genre,
+    totalBars,
+    sections: tab.sections,
+    assignments: tab.assignments,
+    energyLevels: tab.energyLevels,
+    fxAssignments: tab.fxAssignments || {},
+  }, null, 2);
+  zip.file("session_brain.json", brainJson);
 
   // Generate MIDI files for separate channels
   const compiledMidis = generateStemMidis(tab, bpm, genre);

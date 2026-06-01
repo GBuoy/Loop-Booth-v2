@@ -4,7 +4,7 @@
  */
 
 export type SectionLabel = "Intro" | "Verse" | "Pre-Hook" | "Hook" | "Bridge" | "Outro";
-export type StemType = "Drums" | "Bass" | "Melody" | "FX";
+export type StemType = "Drums" | "Bass" | "Melody" | "FX" | "Full";
 export type Genre = "Trap" | "Hip Hop" | "Drill" | "Pop" | "Trip Hop";
 
 export interface Section {

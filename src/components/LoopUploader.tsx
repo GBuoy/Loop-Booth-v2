@@ -102,8 +102,8 @@ export function LoopUploader({ onAdd, sessionBpm }: LoopUploaderProps) {
 
   return (
     <div className="bg-[#0F1115]/60 border border-white/5 rounded-xl p-5 flex flex-col items-center justify-center gap-4 transition-all hover:border-red-500/20 shadow-lg">
-      <div className="flex gap-2.5">
-        {(["Drums", "Bass", "Melody"] as StemType[]).map((type) => (
+      <div className="flex gap-2.5 flex-wrap justify-center">
+        {(["Drums", "Bass", "Melody", "Full"] as StemType[]).map((type) => (
           <button
             key={type}
             onClick={() => setSelectedType(type)}
@@ -113,7 +113,9 @@ export function LoopUploader({ onAdd, sessionBpm }: LoopUploaderProps) {
                   ? "bg-red-600 text-white shadow-md shadow-red-950/40"
                   : type === "Bass"
                   ? "bg-blue-600 text-white shadow-md shadow-blue-950/40"
-                  : "bg-emerald-600 text-white shadow-md shadow-emerald-950/40"
+                  : type === "Melody"
+                  ? "bg-emerald-600 text-white shadow-md shadow-emerald-950/40"
+                  : "bg-purple-600 text-white shadow-md shadow-purple-950/40"
                 : "bg-white/5 text-neutral-400 hover:bg-white/10 hover:text-white border border-white/5"
             }`}
           >

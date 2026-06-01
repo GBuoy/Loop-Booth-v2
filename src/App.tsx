@@ -94,7 +94,7 @@ export default function App() {
   const [bpm, setBpm] = React.useState(140);
   const [sequencerTabIdx, setSequencerTabIdx] = React.useState(0);
   const [loops, setLoops] = React.useState<Loop[]>([]);
-  const [mutes, setMutes] = React.useState<Record<string, boolean>>({ Drums: false, Bass: false, Melody: false, FX: false });
+  const [mutes, setMutes] = React.useState<Record<string, boolean>>({ Full: false, Drums: false, Bass: false, Melody: false, FX: false });
   
   // Tab sequences
   const [seqTabs, setSeqTabs] = React.useState<TabData[]>(() =>
@@ -582,6 +582,45 @@ export default function App() {
     } catch (err) {
       console.error(err);
       alert("Failed to package Sequencer DAWProject ZIP archive.");
+    }
+  };
+
+  const handleExportSessionJSON = () => {
+    try {
+      addLog(`Compiling and exporting standalone LoopBooth Session JSON Brain file...`);
+      const sessionData = {
+        editor_format: "LoopBooth Session Brain v1.2",
+        exported_at: new Date().toISOString(),
+        session_bpm: bpm,
+        session_genre: genre,
+        total_bars: totalSeqBars,
+        active_tab_index: sequencerTabIdx,
+        loops: loops.map(l => ({
+          id: l.id,
+          name: l.name,
+          type: l.type,
+          duration: l.duration,
+          bpm: l.bpm,
+          bars: l.bars
+        })),
+        sections: currentSeqTab.sections,
+        assignments: currentSeqTab.assignments,
+        energy_levels: currentSeqTab.energyLevels,
+        fx_assignments: currentSeqTab.fxAssignments || {}
+      };
+
+      const jsonStr = JSON.stringify(sessionData, null, 2);
+      const blob = new Blob([jsonStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `loopbooth_session_brain_${genre.toLowerCase()}_${bpm}bpm.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      addLog(`Success: Exited LoopBooth JSON State file with ${currentSeqTab.sections.length} markers for external producer pipelines.`);
+    } catch (err: any) {
+      console.error(err);
+      addLog(`Failed to compile standalone JSON payload: ${err.message || err}`);
     }
   };
 
@@ -1443,6 +1482,14 @@ export default function App() {
                     className="flex items-center gap-1.5 bg-red-650 hover:bg-red-500 text-white font-bold px-4 py-2 rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md border border-white/5"
                   >
                     <Activity size={11} /> Export DAWProject (.dawproject)
+                  </button>
+
+                  <button
+                    onClick={handleExportSessionJSON}
+                    className="flex items-center gap-1.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-white/5 font-bold px-4 py-2 rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md"
+                    title="Export raw JSON structured coordinates for training"
+                  >
+                    <Download size={11} className="text-zinc-400" /> Export JSON Brain
                   </button>
                 </div>
 
