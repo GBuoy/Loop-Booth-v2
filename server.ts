@@ -31,11 +31,17 @@ async function startServer() {
   });
 
   // 1. Core API Route: AI-Driven Audio Analysis Endpoint
-  app.post('/api/analyze', upload.single('file'), async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ detail: 'No audio file uploaded' });
+  app.post('/api/analyze', (req, res) => {
+    upload.single('file')(req, res, async (err) => {
+      if (err) {
+        console.error('Upload error:', err);
+        return res.status(400).json({ error: true, message: err.message, code: 'UPLOAD_ERROR' });
       }
+
+      try {
+        if (!req.file) {
+          return res.status(400).json({ error: true, message: 'No audio file uploaded', code: 'NO_FILE' });
+        }
 
       const fileBuffer = req.file.buffer;
       const base64Data = fileBuffer.toString('base64');
@@ -65,10 +71,13 @@ async function startServer() {
       const prompt = `
         Analyze this audio file carefully.
         Identify the tempo (BPM), the predominant musical key (e.g. C Major, F# Minor), the total duration in seconds, the beat intervals, average amplitude energy, typical onset density, spectral distribution ratios, structural section boundaries, and estimated chords.
+        Extract chords by analyzing the harmonic spectral regions for chromagram peak distributions. Do not guess heuristically; observe the actual frequency relationships in the file.
         
         Provide the response in a structured JSON. Be highly accurate and realistic:
         - bpm: number (e.g., 140, 136, 128)
-        - key: string (e.g., "G Major", "C# Minor", "A Minor")
+        - bpm_candidates: array of numbers, provide alternative potential BPMs if the true pulse is ambiguous due to subdivisions or doubletime.
+        - bpm_confidence: number between 0.0 and 1.0 expressing confidence in the primary BPM.
+        - key: string (e.g., "G Major", "C# Minor", "A Dorian", "E Phrygian"). Preserving true modal quality is critically important. Do not just report the root.
         - duration: total duration in seconds (float)
         - beats: array of float timestamps of estimated beats in seconds matching the tempo (e.g., if duration is 10s and BPM is 120, there should be about 20 beat timestamps spaced at 0.5s intervals: [0.0, 0.5, 1.0, 1.5, ...])
         - avg_energy: general float energy between 0 and 1 (0.05 is ambient verse, 0.35 is aggressive trap peak)
@@ -78,7 +87,7 @@ async function startServer() {
         - spectral_profile: object {
             brightness: estimated spectral centroid in Hz (e.g. 1540),
             noisiness: estimated spectral flatness coefficient (e.g. 0.038),
-            bands: { bass: float, mids: float, highs: float } summing up to exactly 1.0
+            bands: { bass: float (20-150Hz), mids: float (150-2000Hz), highs: float (2000Hz+) } summing up to exactly 1.0 (e.g. 0.25, 0.50, 0.25)
           }
         - section_boundaries: array of objects { start: float, end: float, label: string } dividing the track. (e.g., "Intro", "Section A", "Section B", "Chorus", "Outro")
         - chords: array of objects { start: float, end: float, chord: string } indicating the chord progression over time (e.g., "E", "C#m", "A", "N.C.")
@@ -103,6 +112,8 @@ async function startServer() {
               type: Type.OBJECT,
               properties: {
                 bpm: { type: Type.NUMBER },
+                bpm_candidates: { type: Type.ARRAY, items: { type: Type.NUMBER } },
+                bpm_confidence: { type: Type.NUMBER },
                 key: { type: Type.STRING },
                 duration: { type: Type.NUMBER },
                 beats: { type: Type.ARRAY, items: { type: Type.NUMBER } },
@@ -186,7 +197,7 @@ async function startServer() {
                 }
               },
               required: [
-                'bpm', 'key', 'duration', 'beats', 'avg_energy', 'avg_density',
+                'bpm', 'bpm_candidates', 'bpm_confidence', 'key', 'duration', 'beats', 'avg_energy', 'avg_density',
                 'energy_profile', 'density_profile', 'spectral_profile',
                 'section_boundaries', 'chords', 'bars'
               ]
@@ -194,8 +205,65 @@ async function startServer() {
           }
         });
 
-        const jsonString = response.text?.trim() || '';
-        const parsedResult = JSON.parse(jsonString);
+        let jsonString = response.text?.trim() || '';
+        if (jsonString.startsWith('```json')) jsonString = jsonString.replace(/^```json\n/, '').replace(/```$/, '').trim();
+        else if (jsonString.startsWith('```')) jsonString = jsonString.replace(/^```\n/, '').replace(/```$/, '').trim();
+        
+        let parsedResult = JSON.parse(jsonString);
+
+        // 1. Doubletime/Halftime Confidence Check
+        if (parsedResult.bpm_candidates && parsedResult.bpm_candidates.length >= 2) {
+          const sorted = [...parsedResult.bpm_candidates].sort((a, b) => a - b);
+          for (let i = 0; i < sorted.length; i++) {
+            for (let j = i + 1; j < sorted.length; j++) {
+              if (Math.abs(sorted[j] - sorted[i] * 2) < 3.0) {
+                // Found a 1:2 ratio
+                parsedResult.bpm = sorted[i]; // Default to the lower value
+                parsedResult.bpm_confidence = 0.5; // Flag as ambiguous
+                break;
+              }
+            }
+          }
+        }
+
+        // 2. Tolerance Layer & Context Validation for Bars
+        const beatInterval = 60 / parsedResult.bpm;
+        const barInterval = beatInterval * 4;
+        const theoreticalBars = parsedResult.duration / barInterval;
+        
+        const standardBars = [1, 2, 4, 8, 16, 32];
+        let quantizedBars = Math.round(theoreticalBars);
+        let validMusicalLength = false;
+        
+        for (const std of standardBars) {
+          if (Math.abs(theoreticalBars - std) / std <= 0.05) { // ±5% tolerance
+            quantizedBars = std;
+            validMusicalLength = true;
+            break;
+          }
+        }
+
+        if (!validMusicalLength) {
+          console.warn(`[Tolerance] Non-standard bar length detected: ${theoreticalBars.toFixed(2)} bars. Flagging as non-standard.`);
+          parsedResult.non_standard_bars = true;
+          parsedResult.theoretical_bars = theoreticalBars;
+        }
+
+        // Regenerate structural arrays if they are misaligned with verified duration/bpm
+        if (parsedResult.bars.length !== quantizedBars || !validMusicalLength) {
+           console.log(`[Re-building Bars] Quantized to ${quantizedBars} bars (Theoretical: ${theoreticalBars.toFixed(2)}).`);
+           const newBars = [];
+           for(let b=0; b<quantizedBars; b++) {
+             newBars.push({
+               number: b + 1,
+               start: parseFloat((b * barInterval).toFixed(3)),
+               end: parseFloat(Math.min((b + 1) * barInterval, parsedResult.duration).toFixed(3)),
+               beats: []
+             });
+           }
+           parsedResult.bars = newBars;
+        }
+
         return res.json(parsedResult);
 
       } catch (geminiError) {
@@ -206,8 +274,9 @@ async function startServer() {
 
     } catch (e: any) {
       console.error('Fatal API Analyze error:', e);
-      res.status(500).json({ detail: `Server error during analysis: ${e.message || e}` });
+      res.status(500).json({ error: true, message: `Server error during analysis: ${e.message || e}`, code: 'EMODEL' });
     }
+   });
   });
 
   // 2. MIDI Chord Downloader Endpoint
@@ -418,7 +487,7 @@ function generateChordMidiBytes(chords: any[], beats: any[], bpm: number): Uint8
   // MIDI Header Track
   const header = [
     0x4D, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06,
-    0x00, 0x01, 0x00, 0x01, // Single multi-channel track
+    0x00, 0x00, 0x00, 0x01, // Format 0 (single track)
     0x00, ppq >> 8, ppq & 0xFF
   ];
 

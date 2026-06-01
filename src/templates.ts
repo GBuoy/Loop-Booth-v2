@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { SectionLabel, StemType, Genre, Loop, Section, TabData } from "./types";
+import { SectionLabel, StemType, Genre, Loop, Section, TabData, ArrangementClip } from "./types";
 
 // 5 genres: Trap, Hip Hop, Drill, Pop, Trip Hop
 export const DRUM_PATTERNS: Record<string, Record<string, number[]>> = {
@@ -170,9 +170,10 @@ export function generateTabVariation(
 
   const energyLevels: Record<string, number> = {};
   const assignments: Record<string, string> = {};
+  const clips: ArrangementClip[] = [];
 
   sections.forEach(section => {
-    (["Drums", "Bass", "Melody"] as StemType[]).forEach(stem => {
+    (["Drums", "Bass", "Melody", "FX"] as StemType[]).forEach(stem => {
       const key = `${section.id}-${stem}`;
       if (section.label === "Intro") energyLevels[key] = 2;
       else if (section.label === "Verse") energyLevels[key] = 3;
@@ -182,9 +183,43 @@ export function generateTabVariation(
       else energyLevels[key] = 3;
 
       const matchingLoop = loops.find(l => l.type === stem);
-      assignments[key] = matchingLoop ? matchingLoop.id : stem;
+      
+      let startBar = section.start - 1;
+      let endBar = section.end;
+      let isDroppedOut = false;
+
+      // Intentional dropouts based on genre and section
+      if (stem === "Drums" && section.label === "Intro") isDroppedOut = true;
+      if (stem === "Bass" && section.label === "Intro") isDroppedOut = true;
+      if (stem === "Drums" && section.label === "Pre-Hook" && genre === "Pop") isDroppedOut = true;
+      if (stem === "Drums" && section.label === "Outro") isDroppedOut = Math.random() > 0.5;
+
+      // Prove sub-section proportional clip functionality
+      // If we are in a Verse and this is Drums, stop the clip 2 bars early for dramatic effect.
+      if (stem === "Drums" && section.label === "Verse" && (section.end - section.start >= 8)) {
+        endBar -= 2; // Clip ends 2 bars early
+      }
+      
+      // If we are in a Hook and this is FX, delay the entry by 2 bars
+      if (stem === "FX" && section.label === "Hook" && (section.end - section.start >= 4)) {
+        startBar += 2;
+      }
+
+      if (!isDroppedOut) {
+        assignments[key] = matchingLoop ? matchingLoop.id : stem;
+        clips.push({
+           id: Math.random().toString(36).substring(2, 9),
+           stem: stem,
+           startBar: startBar,
+           endBar: endBar,
+           energy: energyLevels[key],
+           assignedLoopId: assignments[key]
+        });
+      } else {
+        assignments[key] = ""; // Empty string means mute/empty
+      }
     });
   });
 
-  return { sections, assignments, energyLevels, fxAssignments: {} };
+  return { sections, clips, assignments, energyLevels, fxAssignments: {} };
 }

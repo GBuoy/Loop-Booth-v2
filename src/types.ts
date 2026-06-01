@@ -24,12 +24,32 @@ export interface Loop {
   url: string;
 }
 
+export type SubBarEventType = "Note On" | "Sweep" | "Chop" | "Dropout" | "Fill" | "Re-entry" | "Silence";
+
+export interface SubBarEvent {
+  id: string;
+  type: SubBarEventType;
+  startBeat: number;
+  endBeat: number;
+}
+
+export interface ArrangementClip {
+  id: string;
+  stem: string; // e.g. "Drums", "Bass"
+  startBar: number; // e.g. 1
+  endBar: number; // exclusively end bar, e.g. if start 1 end 5, duration is 4 bars
+  energy: number;
+  assignedLoopId: string;
+}
+
 export interface TabData {
   id: number;
   sections: Section[];
-  assignments: Record<string, string>; // key: `${section.id}-${stem}` -> loopId or loopName
-  energyLevels: Record<string, number>; // key: `${section.id}-${stem}` -> 1..5
+  clips: ArrangementClip[];
+  assignments: Record<string, string>; // kept for backward compat if needed
+  energyLevels: Record<string, number>; // kept for backward compat if needed
   fxAssignments: Record<string, string>;
+  subBarEvents?: Record<string, SubBarEvent[]>;
 }
 
 export interface SpectralProfile {
@@ -68,9 +88,13 @@ export interface SeriesPoint {
 
 export interface AudioAnalysisResult {
   bpm: number;
+  bpm_confidence?: number;
+  alt_bpm?: number[];
   key: string;
   duration: number;
   beats: number[];
+  non_standard_bars?: boolean;
+  theoretical_bars?: number;
   avg_energy: number;
   avg_density: number;
   energy_profile: SeriesPoint[];

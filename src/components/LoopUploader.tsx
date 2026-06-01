@@ -14,12 +14,14 @@ interface LoopUploaderProps {
 
 export function LoopUploader({ onAdd, sessionBpm }: LoopUploaderProps) {
   const [loading, setLoading] = React.useState(false);
+  const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
   const [selectedType, setSelectedType] = React.useState<StemType>("Melody");
   const [isDragActive, setIsDragActive] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const analyzeAudio = async (file: File) => {
     setLoading(true);
+    setErrorMsg(null);
     try {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       const audioCtx = new AudioContextClass();
@@ -41,10 +43,20 @@ export function LoopUploader({ onAdd, sessionBpm }: LoopUploaderProps) {
       } catch (decodeErr) {
         console.warn("Standard decode failed, trying raw decode parser fallback:", decodeErr);
         throw decodeErr;
+      } finally {
+        if (audioCtx.state !== 'closed') {
+          await audioCtx.close();
+        }
       }
 
       const duration = audioBuffer.length / audioBuffer.sampleRate;
-      const bars = Math.round((sessionBpm * duration) / 60) || 4;
+      const beats = (sessionBpm * duration) / 60;
+      const rawBars = beats / 4;
+      
+      const standardBars = [1, 2, 4, 8, 16, 24, 32];
+      const bars = standardBars.reduce((prev, curr) => 
+        Math.abs(curr - rawBars) < Math.abs(prev - rawBars) ? curr : prev
+      ) || 4;
 
       onAdd({
         id: Math.random().toString(36).substring(2, 11),
@@ -55,20 +67,9 @@ export function LoopUploader({ onAdd, sessionBpm }: LoopUploaderProps) {
         bars,
         url: URL.createObjectURL(file)
       });
-    } catch (e) {
-      console.error("Audio Web Context analysis failed, using fallback metrics:", e);
-      // Fallback if decode fails (e.g. format unsupported in standard browser audio decode)
-      const durationFallback = 8.0; // Assume 8 seconds loop
-      const barsFallback = Math.round((sessionBpm * durationFallback) / 60) || 4;
-      onAdd({
-        id: Math.random().toString(36).substring(2, 11),
-        name: file.name.replace(/\.[^/.]+$/, ""),
-        type: selectedType,
-        duration: durationFallback,
-        bpm: sessionBpm,
-        bars: barsFallback,
-        url: URL.createObjectURL(file)
-      });
+    } catch (e: any) {
+      console.error("Audio Web Context analysis failed:", e);
+      setErrorMsg(`Failed to decode audio file (${file.name}). Format may be unsupported or file corrupted.`);
     } finally {
       setLoading(false);
       // Clear file input so same file can be re-selected/uploaded
@@ -156,9 +157,14 @@ export function LoopUploader({ onAdd, sessionBpm }: LoopUploaderProps) {
         <span className="text-[10px] font-bold text-neutral-400 uppercase mt-3 tracking-widest hover:text-white transition-all">
           {loading ? "Analyzing Loop Signal..." : `Upload or Drag ${selectedType} Loop`}
         </span>
-        <span className="text-[8px] text-neutral-550 font-mono mt-1 block">
+        <span className="text-[8px] text-neutral-550 font-mono mt-1 block mb-2">
           Accepts WAV, MP3, AIFF, OGG
         </span>
+        {errorMsg && (
+          <div className="mt-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-1.5 rounded-md">
+            {errorMsg}
+          </div>
+        )}
       </div>
     </div>
   );

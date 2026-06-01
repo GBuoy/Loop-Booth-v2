@@ -4,18 +4,14 @@
  */
 
 import React from "react";
-import { Volume2, VolumeX, ChevronUp, ChevronDown, Check, FolderOpen, Zap } from "lucide-react";
-import { Section, Loop, StemType, Genre } from "../types";
+import { Volume2, VolumeX } from "lucide-react";
+import { Section, Loop, StemType, Genre, ArrangementClip } from "../types";
 
 interface ArrangementGridProps {
   genre: Genre;
   sections: Section[];
+  clips: ArrangementClip[];
   loops: Loop[];
-  assignments: Record<string, string>;
-  energyLevels: Record<string, number>;
-  onAssign: (sid: string, row: string, lid: string, energy?: number) => void;
-  onEnergyChange: (sid: string, row: string, energy: number) => void;
-  onOpenPianoRoll: (sid: string, stem: string) => void;
   mutes: Record<string, boolean>;
   onToggleMute: (row: string) => void;
   totalBars: number;
@@ -24,190 +20,180 @@ interface ArrangementGridProps {
 export function ArrangementGrid({
   genre,
   sections,
+  clips,
   loops,
-  assignments,
-  energyLevels,
-  onAssign,
-  onEnergyChange,
-  onOpenPianoRoll,
   mutes,
   onToggleMute,
-  totalBars
+  totalBars,
 }: ArrangementGridProps) {
-  const rows: StemType[] = ["Full", "Drums", "Bass", "Melody"];
-  const [activeCellSelect, setActiveCellSelect] = React.useState<{ sid: string; row: string } | null>(null);
+  const rows: StemType[] = ["Drums", "Bass", "Melody", "FX"];
 
   const getEnergyColor = (row: string, energy: number, isMuted: boolean) => {
     if (isMuted) return "rgba(38, 38, 38, 0.9)";
     const colors: Record<string, string> = {
-      Full: "147, 51, 234",   // Deep Purple / Amethyste
       Drums: "220, 38, 38",  // Crimson Red
-      Bass: "37, 99, 235",   // Sophisticated Royal Blue
-      Melody: "5, 150, 105"  // Sophisticated Emerald Green
+      Bass: "37, 99, 235",   // Royal Blue
+      Melody: "5, 150, 105", // Emerald Green
+      FX: "147, 51, 234",    // Deep Purple
+      Full: "80, 80, 80"
     };
     const rgb = colors[row] || "220, 38, 38";
-    const opacities = [0.15, 0.35, 0.55, 0.75, 1.0];
-    return `rgba(${rgb}, ${opacities[energy - 1] || 0.55})`;
+    const opacities = [0.25, 0.45, 0.65, 0.85, 1.0];
+    return `rgba(${rgb}, ${opacities[energy - 1] || 0.65})`;
   };
 
-  const cycleEnergy = (sid: string, row: string, currentEnergy: number) => {
-    const newEnergy = currentEnergy >= 5 ? 1 : currentEnergy + 1;
-    onEnergyChange(sid, row, newEnergy);
+  const renderClipBackgroundTexture = () => {
+    // Return subtle tick marks for sub-bar visibility
+    return {
+      backgroundImage: "linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)",
+      backgroundSize: "25% 100%" // Assuming 4 beats per bar
+    };
   };
 
   return (
     <div className="flex flex-col gap-1 w-full overflow-x-auto custom-scrollbar pb-3">
-      {/* Section Headers */}
-      <div className="flex ml-28 mb-1.5 min-w-[800px]">
-        {sections.map((section) => (
-          <div
-            key={section.id}
-            style={{ width: `${((section.end - section.start + 1) / totalBars) * 100}%` }}
-            className="py-2.5 px-3 border-r border-white/5 bg-[#0F1115] text-[10px] text-neutral-300 font-bold uppercase tracking-wider shadow-lg flex items-center justify-between min-w-[120px]"
-          >
-            <span className="truncate">{section.label}</span>
-            <span className="opacity-40 font-mono text-[9px]">B{section.start}-{section.end}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Grid Rows */}
-      <div className="flex flex-col gap-1 min-w-[800px]">
-        {rows.map((row) => (
-          <div key={row} className="flex items-center gap-3 h-24 group relative">
-            
-            {/* Stem Track Controller Label */}
-            <div className="w-28 flex items-center justify-between bg-[#0F1115]/80 border border-white/5 rounded-xl px-3 py-2 shrink-0 shadow-md">
-              <span className={`text-[11px] font-bold uppercase tracking-wider ${mutes[row] ? 'text-zinc-600 line-through' : 'text-zinc-200'}`}>
-                {row}
-              </span>
-              <button
-                onClick={() => onToggleMute(row)}
-                className={`transition-all duration-200 cursor-pointer ${mutes[row] ? 'text-zinc-600 hover:text-zinc-400' : 'text-red-500 hover:text-red-400'}`}
+      {/* Container holding the tracks and timeline */}
+      <div className="relative min-w-[800px] flex flex-col">
+        
+        {/* Timeline Ruler / Section Headers */}
+        <div className="flex mb-1 relative ml-28 border-b border-white/10 h-8 font-mono">
+          {sections.map((section) => {
+            const leftPct = ((section.start - 1) / totalBars) * 100;
+            const widthPct = ((section.end - section.start + 1) / totalBars) * 100;
+            return (
+              <div
+                key={section.id}
+                style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                className="absolute top-0 h-full border-r border-white/5 bg-[#17191E] flex items-center justify-between px-2 text-[10px] shadow-lg text-neutral-300 font-bold uppercase tracking-wider"
               >
-                {mutes[row] ? <VolumeX size={15} /> : <Volume2 size={15} />}
-              </button>
-            </div>
+                <span className="truncate text-red-500">{section.label}</span>
+                <span className="opacity-40 text-[9px]">{section.start}</span>
+              </div>
+            );
+          })}
+        </div>
 
-            {/* Timeline Blocks */}
-            <div className={`flex-1 flex h-full border border-white/5 bg-[#0A0A0B] rounded-xl overflow-hidden relative ${mutes[row] ? 'opacity-30 grayscale pointer-events-none' : ''}`}>
-              {sections.map((section) => {
-                const key = `${section.id}-${row}`;
-                const energy = energyLevels[key] || 3;
-                const assignedLoopId = assignments[key];
+        {/* Global Grid Lines underlying all lanes */}
+        <div className="absolute top-8 bottom-0 left-28 right-0 pointer-events-none flex opacity-10">
+          {Array.from({ length: totalBars }).map((_, i) => (
+             <div key={i} className="h-full border-r border-white" style={{ width: `${100 / totalBars}%` }} />
+          ))}
+        </div>
+
+        {/* Stem Lanes */}
+        <div className="flex flex-col gap-2 relative">
+          {rows.map((row) => {
+            const rowClips = clips.filter(c => c.stem === row);
+            const sortedClips = [...rowClips].sort((a, b) => a.startBar - b.startBar);
+            const silenceClips: { startBar: number; endBar: number }[] = [];
+            let currentBar = 0;
+            sortedClips.forEach(clip => {
+              if (clip.startBar > currentBar) {
+                silenceClips.push({ startBar: currentBar, endBar: clip.startBar });
+              }
+              currentBar = Math.max(currentBar, clip.endBar);
+            });
+            if (currentBar < totalBars) {
+              silenceClips.push({ startBar: currentBar, endBar: totalBars });
+            }
+            
+            return (
+              <div key={row} className="flex items-stretch gap-3 h-[72px] group relative transition-all duration-300 w-full">
                 
-                // Find loop if assigned by ID, otherwise fallback search by type or name
-                const assignedLoop = loops.find(l => l.id === assignedLoopId || l.name === assignedLoopId);
-                const hasAssigned = !!assignedLoopId;
-
-                return (
-                  <div
-                    key={section.id}
-                    style={{
-                      width: `${((section.end - section.start + 1) / totalBars) * 100}%`,
-                      backgroundColor: hasAssigned ? getEnergyColor(row, energy, false) : 'transparent'
-                    }}
-                    onDoubleClick={() => onOpenPianoRoll(section.id, row)}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveCellSelect(activeCellSelect?.sid === section.id && activeCellSelect?.row === row ? null : { sid: section.id, row });
-                    }}
-                    className={`h-full border-r-4 border-[#080808] flex flex-col items-center justify-center px-1.5 cursor-pointer transition-all hover:bg-zinc-800/10 group/cell relative min-w-[120px] ${hasAssigned ? 'shadow-inner' : 'border-dashed border-zinc-800/20'}`}
+                {/* Stem Track Controller Label */}
+                <div className="w-28 flex items-center justify-between bg-[#0F1115] border border-transparent group-hover:border-white/5 rounded-none px-3 py-2 shrink-0 shadow z-10 self-center h-full">
+                  <span className={`text-[11px] font-bold uppercase tracking-wider ${mutes[row] ? 'text-zinc-600 line-through' : 'text-zinc-200'}`}>
+                    {row}
+                  </span>
+                  <button
+                    onClick={() => onToggleMute(row)}
+                    className={`transition-all duration-200 cursor-pointer ${mutes[row] ? 'text-zinc-600 hover:text-zinc-400' : 'text-red-500 hover:text-red-400'}`}
                   >
-                    {!hasAssigned ? (
-                      <div className="flex flex-col items-center gap-1 opacity-20 group-hover/cell:opacity-60 transition-opacity">
-                        <FolderOpen size={14} className="text-zinc-600" />
-                        <span className="text-[8px] font-bold uppercase tracking-wider text-zinc-500">Empty Grid</span>
-                      </div>
-                    ) : (
-                      <>
-                        <span className="text-[10px] font-black text-white uppercase tracking-tight text-center truncate max-w-full px-1 filter drop-shadow">
-                          {assignedLoop ? assignedLoop.name : row}
-                        </span>
-                        
-                        {/* Energy Multipliers Badge */}
-                        <div className="flex items-center gap-0.5 mt-1 bg-black/45 border border-white/5 rounded pl-1 pr-1.5 py-0.5 select-none hover:bg-black/60 transition-colors">
-                          <Zap size={8} className="text-red-400 fill-red-400" />
-                          <span className="text-[8px] font-bold text-red-200 font-mono">{energy} / 5</span>
-                        </div>
+                    {mutes[row] ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                  </button>
+                </div>
 
-                        {/* Energy Level Controls */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            cycleEnergy(section.id, row, energy);
-                          }}
-                          className="absolute bottom-1.5 right-1.5 opacity-0 group-hover/cell:opacity-100 transition-all duration-200 bg-black/80 border border-white/10 hover:bg-neutral-800 rounded p-1 flex items-center gap-0.5 cursor-pointer shadow-lg"
-                          title="Click to cycle energy"
-                        >
-                          <ChevronUp size={8} className="text-red-400" />
-                        </button>
-                      </>
-                    )}
-
-                    {/* Popover selector to assign a loaded loop to this section cell */}
-                    {activeCellSelect?.sid === section.id && activeCellSelect?.row === row && (
+                {/* Timeline Lane */}
+                <div className={`flex-1 relative bg-[#0D0E12] rounded-r-md ${mutes[row] ? 'opacity-30 grayscale pointer-events-none' : ''}`}>
+                  
+                  {/* Silence Segments */}
+                  {silenceClips.map((sClip, idx) => {
+                    const leftPct = (sClip.startBar / totalBars) * 100;
+                    const widthPct = ((sClip.endBar - sClip.startBar) / totalBars) * 100;
+                    return (
                       <div
-                        onClick={(e) => e.stopPropagation()}
-                        className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-48 bg-[#0F1115] border border-white/10 rounded-xl p-2 z-20 shadow-2xl shadow-black/80 text-left animate-fade-in"
+                        key={`silence-${idx}`}
+                        className="absolute top-0.5 bottom-0.5 rounded border-t border-b border-white/5 overflow-hidden flex flex-col justify-between opacity-30 select-none pointer-events-none"
+                        style={{
+                          left: `${leftPct}%`,
+                          width: `${widthPct}%`,
+                          backgroundImage: "linear-gradient(90deg, rgba(255,255,255,0.01) 1px, transparent 1px)",
+                          backgroundSize: "25% 100%"
+                        }}
                       >
-                        <div className="text-[9px] text-neutral-400 font-bold uppercase tracking-wider mb-1.5 pb-1 border-b border-white/10 px-1">
-                          Assign {row} Loop:
-                        </div>
-                        <div className="flex flex-col gap-1 max-h-36 overflow-y-auto scrollbar-thin">
-                          
-                          {/* Option to clear assignment */}
-                          <button
-                            onClick={() => {
-                              onAssign(section.id, row, "");
-                              setActiveCellSelect(null);
-                            }}
-                            className={`flex items-center justify-between text-[10px] px-2 py-1.5 rounded transition-colors text-left w-full cursor-pointer hover:bg-white/5 ${!assignedLoopId ? 'text-red-400 font-bold bg-red-950/20 border border-red-500/30' : 'text-neutral-400'}`}
-                          >
-                            <span>[ None / Silence ]</span>
-                            {!assignedLoopId && <Check size={10} className="text-red-400" />}
-                          </button>
-
-                          {/* Predefined synthesis track */}
-                          <button
-                            onClick={() => {
-                              onAssign(section.id, row, row); // Default programmatic synthesizer
-                              setActiveCellSelect(null);
-                            }}
-                            className={`flex items-center justify-between text-[10px] px-2 py-1.5 rounded transition-colors text-left w-full cursor-pointer hover:bg-white/5 ${assignedLoopId === row ? 'text-red-400 font-bold bg-red-950/20 border border-red-500/30' : 'text-neutral-200'}`}
-                          >
-                            <span className="truncate">🎯 MIDI Synth Patterns</span>
-                            {assignedLoopId === row && <Check size={10} className="text-red-400" />}
-                          </button>
-
-                          {/* List of custom uploaded loops matching this stem type */}
-                          {loops.filter(l => l.type === row).map(l => (
-                            <button
-                              key={l.id}
-                              onClick={() => {
-                                onAssign(section.id, row, l.id);
-                                setActiveCellSelect(null);
-                              }}
-                              className={`flex items-center justify-between text-[10px] px-2 py-1.5 rounded transition-colors text-left w-full cursor-pointer hover:bg-white/5 ${assignedLoopId === l.id ? 'text-red-400 font-bold bg-red-950/20 border border-red-500/30' : 'text-neutral-250'}`}
-                            >
-                              <span className="truncate">{l.name}</span>
-                              {assignedLoopId === l.id && <Check size={10} className="text-red-400" />}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="text-[8px] text-neutral-500 text-center mt-1.5 pt-1 border-t border-white/5">
-                          Double click cell to preview midi notes
-                        </div>
+                         <div className="flex justify-between items-start pt-1 px-1 w-full opacity-60 grayscale filter mix-blend-overlay">
+                            <div className="flex-1 flex justify-between px-2 text-[10px] font-mono text-white/10 font-black overflow-hidden translate-y-0.5">
+                              <span>→</span>
+                              <div className="flex-1 flex justify-evenly mx-2 overflow-hidden items-center">
+                                {Array.from({ length: Math.max(1, sClip.endBar - sClip.startBar - 2) }).map((_, i) => (
+                                   <span key={i}>{i + 2}</span>
+                                ))}
+                              </div>
+                              <span>←</span>
+                            </div>
+                         </div>
                       </div>
-                    )}
+                    );
+                  })}
 
-                  </div>
-                );
-              })}
-            </div>
+                  {/* Active Clips */}
+                  {sortedClips.map((clip) => {
+                    const leftPct = (clip.startBar / totalBars) * 100;
+                    const widthPct = ((clip.endBar - clip.startBar) / totalBars) * 100;
 
-          </div>
-        ))}
+                    return (
+                      <div
+                        key={clip.id}
+                        className="absolute top-0.5 bottom-0.5 rounded shadow-md border-t border-white/20 border-b border-black/50 overflow-hidden flex flex-col justify-between"
+                        style={{
+                          left: `${leftPct}%`,
+                          width: `${widthPct}%`,
+                          backgroundColor: getEnergyColor(row, clip.energy, false),
+                          ...renderClipBackgroundTexture()
+                        }}
+                      >
+                         <div className="flex justify-between items-start pt-1 px-1 w-full">
+                            <span className="text-[10px] font-black text-white/90 uppercase tracking-tight truncate drop-shadow filter whitespace-nowrap z-10 w-1/3">
+                              {clip.stem}
+                            </span>
+                            <div className="flex-1 flex justify-between px-2 text-[10px] font-mono text-black/40 font-black overflow-hidden select-none translate-y-0.5 pointer-events-none">
+                              <span>→</span>
+                              <div className="flex-1 flex justify-evenly mx-2 overflow-hidden items-center opacity-50">
+                                {/* Dynamically generate numbers based on horizontal space - simplest static approach for visual approximation: */}
+                                {Array.from({ length: Math.max(1, clip.endBar - clip.startBar - 2) }).map((_, i) => (
+                                   <span key={i}>{i + 2}</span>
+                                ))}
+                              </div>
+                              <span>←</span>
+                            </div>
+                         </div>
+                         <div className="flex justify-between items-end pb-1 px-1 w-full">
+                            <span className="text-[8px] font-bold text-white/60 font-mono bg-black/40 px-1 rounded-sm z-10">
+                              +{clip.energy}/5
+                            </span>
+                            <span className="text-[8px] text-black/30 font-bold truncate">
+                               {clip.assignedLoopId && clip.assignedLoopId !== clip.stem ? "Custom" : "Synth"}
+                            </span>
+                         </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
       </div>
     </div>
   );

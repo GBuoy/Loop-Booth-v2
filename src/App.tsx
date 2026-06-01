@@ -99,24 +99,20 @@ export default function App() {
   
   // Tab sequences
   const [seqTabs, setSeqTabs] = React.useState<TabData[]>(() =>
-    Array.from({ length: 6 }, (_, i) => ({
-      id: i,
-      sections: [
-        { id: "1", label: "Intro", start: 1, end: 8 },
-        { id: "2", label: "Verse", start: 9, end: 24 },
-        { id: "3", label: "Hook", start: 25, end: 32 }
-      ],
-      assignments: {},
-      energyLevels: {
-        "1-Drums": 2, "1-Bass": 2, "1-Melody": 3,
-        "2-Drums": 4, "2-Bass": 3, "2-Melody": 4,
-        "3-Drums": 5, "3-Bass": 5, "3-Melody": 5
-      },
-      fxAssignments: {}
-    }))
+    Array.from({ length: 6 }, (_, i) => {
+      // Pre-generate a variation template based on default genre "Trap" so timeline renders immediately
+      const variation = generateTabVariation("Trap", [], 32, i);
+      return {
+        id: i,
+        sections: variation.sections || [],
+        clips: variation.clips || [],
+        assignments: variation.assignments || {},
+        energyLevels: variation.energyLevels || {},
+        fxAssignments: variation.fxAssignments || {}
+      };
+    })
   );
 
-  const [pianoRollSection, setPianoRollSection] = React.useState<{ sid: string; stem: string } | null>(null);
   const [exportCounter, setExportCounter] = React.useState<Record<string, number>>({});
 
   const [changeLogs, setChangeLogs] = React.useState<string[]>(["Session initialized inside LoopBooth Studio v1.2"]);
@@ -136,6 +132,9 @@ export default function App() {
     setAudioFile(file);
     setIsUploading(true);
     setAnalysisError(null);
+    setAnalysisResult(null);
+    setAudioUrl(null);
+    setIsPlaying(false);
     setUploadStatus("Uploading element to audio AI parser core...");
     setUploadProgress(15);
 
@@ -160,8 +159,14 @@ export default function App() {
       .then(async (response) => {
         clearInterval(progressInterval);
         if (!response.ok) {
-          const err = await response.json();
-          throw new Error(err.detail || "Analysis endpoint returned non-OK code");
+          const contentType = response.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const err = await response.json();
+            throw new Error(err.message || err.detail || `Analysis failed (Status ${response.status})`);
+          } else {
+            const text = await response.text();
+            throw new Error(`Server returned non-JSON error (${response.status}): ${text.substring(0, 120)}`);
+          }
         }
         return response.json();
       })
@@ -607,7 +612,23 @@ export default function App() {
         sections: currentSeqTab.sections,
         assignments: currentSeqTab.assignments,
         energy_levels: currentSeqTab.energyLevels,
-        fx_assignments: currentSeqTab.fxAssignments || {}
+        fx_assignments: currentSeqTab.fxAssignments || {},
+        sub_bar_events: currentSeqTab.subBarEvents ? Object.entries(currentSeqTab.subBarEvents).flatMap(([key, events]) => {
+          const [secId, stem] = key.split("-");
+          const section = currentSeqTab.sections.find(s => s.id === secId);
+          return (events as any[]).map(e => {
+            const startAbsoluteBeat = section ? (section.start - 1) * 4 + e.startBeat : e.startBeat;
+            const absoluteBar = Math.floor(startAbsoluteBeat / 4) + 1;
+            return {
+              section_parent: secId,
+              stem: stem,
+              event_type: e.type,
+              beat_position_start: e.startBeat,
+              beat_position_end: e.endBeat,
+              bar_number: absoluteBar
+            };
+          });
+        }) : []
       };
 
       const jsonStr = JSON.stringify(sessionData, null, 2);
@@ -763,6 +784,12 @@ export default function App() {
     });
     const sectName = currentSeqTab.sections.find(s => s.id === sid)?.label || "Section";
     addLog(`Adjusted stem channel [${row}] energy level to ${energy}/5 in ${sectName}`);
+  };
+
+  const handleSubBarEventsChange = (sid: string, row: string, events: any[]) => {
+    updateSequencerTab({
+      subBarEvents: { ...(currentSeqTab.subBarEvents || {}), [`${sid}-${row}`]: events }
+    });
   };
 
   const handleSuggestArrangement = () => {
@@ -1059,8 +1086,17 @@ export default function App() {
                         BPM
                       </div>
                       <div className="flex flex-col">
-                        <span className="text-[9px] text-neutral-500 uppercase tracking-wider font-mono">Tempo</span>
-                        <span className="text-base font-bold font-mono text-neutral-100">{analysisResult.bpm}</span>
+                        <span className="text-[9px] text-neutral-500 uppercase tracking-wider font-mono">
+                          Tempo {analysisResult.bpm_confidence && analysisResult.bpm_confidence < 0.7 && "(Ambig)"}
+                        </span>
+                        <span className="text-base font-bold font-mono text-neutral-100 flex items-center gap-1">
+                          {analysisResult.bpm}
+                          {analysisResult.bpm_confidence && (
+                             <span className="text-[8px] text-neutral-600 font-normal">
+                               ({Math.round(analysisResult.bpm_confidence * 100)}%)
+                             </span>
+                          )}
+                        </span>
                       </div>
                     </div>
 
@@ -1084,8 +1120,17 @@ export default function App() {
                         BAR
                       </div>
                       <div className="flex flex-col">
-                        <span className="text-[9px] text-neutral-500 uppercase tracking-wider font-mono">Bars Count</span>
-                        <span className="text-base font-bold font-mono text-neutral-100">{analysisResult.bars.length}</span>
+                        <span className="text-[9px] text-neutral-500 uppercase tracking-wider font-mono">
+                          Bars Count {analysisResult.non_standard_bars && <span className="text-red-400 ml-1" title={`Theoretical: ${analysisResult.theoretical_bars?.toFixed(2)}`}>[!]</span>}
+                        </span>
+                        <span className="text-base font-bold font-mono text-neutral-100 flex items-center gap-1">
+                          {analysisResult.bars.length} 
+                          {analysisResult.non_standard_bars && (
+                            <span className="text-[8px] text-neutral-600 font-normal">
+                              ({analysisResult.theoretical_bars?.toFixed(1)})
+                            </span>
+                          )}
+                        </span>
                       </div>
                     </div>
 
@@ -1655,12 +1700,8 @@ export default function App() {
                   <ArrangementGrid
                     genre={genre}
                     sections={currentSeqTab.sections}
+                    clips={currentSeqTab.clips}
                     loops={loops}
-                    assignments={currentSeqTab.assignments}
-                    energyLevels={currentSeqTab.energyLevels}
-                    onAssign={handleSeqAssign}
-                    onEnergyChange={handleSeqEnergyChange}
-                    onOpenPianoRoll={(sid, stem) => setPianoRollSection({ sid, stem })}
                     mutes={mutes}
                     onToggleMute={(row) => setMutes(p => ({ ...p, [row]: !p[row] }))}
                     totalBars={totalSeqBars}
@@ -1788,108 +1829,6 @@ export default function App() {
 
         </div>
       </main>
-
-      {/* PIANO ROLL MOTIF MODAL POPUP PREVIEW */}
-      {pianoRollSection && (
-        <div className="fixed inset-0 bg-[#0A0A0B]/85 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-[#0D0E12] border border-white/5 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col animate-fade-in">
-            <div className="p-4 bg-[#0F1115] border-b border-white/5 flex justify-between items-center">
-              <div>
-                <h4 className="text-xs font-bold text-red-400 uppercase tracking-widest">Simulated Piano Roll Motif</h4>
-                <p className="text-[9px] text-neutral-500 font-mono mt-0.5">Cell Context: {pianoRollSection.stem} &bull; Section {pianoRollSection.sid}</p>
-              </div>
-              <button 
-                onClick={() => setPianoRollSection(null)}
-                className="text-neutral-500 hover:text-white cursor-pointer hover:bg-white/5 p-1 rounded-full text-center transition-colors"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="p-5 flex-1 flex flex-col gap-4 text-center">
-              
-              {/* Retro step sequencer mock board UI */}
-              <div className="bg-[#0A0A0B] p-4 rounded-xl border border-white/5 grid grid-rows-4 gap-1.5 select-none shrink-0 font-mono text-[9px]">
-                {/* Sequence rows */}
-                {[...Array(4)].map((_, rIdx) => (
-                  <div key={rIdx} className="flex gap-1 items-center">
-                    <span className="w-8 shrink-0 text-neutral-500 font-bold text-right pr-2">MIDI</span>
-                    <div className="flex-1 grid grid-cols-16 gap-1 h-3.5">
-                      {[...Array(16)].map((_, cIdx) => {
-                        const cellSeed = (rIdx * 7) + (cIdx * 11) + (pianoRollSection.sid.charCodeAt(0) * 11);
-                        const isNoteTriggered = cellSeed % 5 === 0 || cellSeed % 9 === 0;
-
-                        return (
-                          <div 
-                            key={cIdx} 
-                            style={{ opacity: isNoteTriggered ? 1 : 0.08 }}
-                            className={`rounded-sm h-full ${
-                              pianoRollSection.stem === "Drums" 
-                                ? "bg-red-600" 
-                                : pianoRollSection.stem === "Bass" 
-                                ? "bg-neutral-500" 
-                                : "bg-red-400"
-                            }`} 
-                          />
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Description summary */}
-              <div className="text-left bg-[#0A0A0B] border border-white/5 rounded-xl p-3 text-[10px] leading-relaxed text-neutral-450">
-                <span className="text-red-400 font-bold uppercase">Composition Details:</span> Generates a deterministic step segment based on the active <strong>{genre}</strong> drum blueprint and chord scale <strong>({CHORD_NAMES[genre]?.[pianoRollSection.sid.charCodeAt(0) % (CHORD_NAMES[genre]?.length || 1)] || "C"})</strong>. Subdivided at 16th quantization, providing precise polyrhythmic transients for DAW multitrack imports.
-              </div>
-
-            </div>
-
-            <div className="p-4 bg-[#0F1115] border-t border-white/5 flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  try {
-                    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-                    const osc = ctx.createOscillator();
-                    const filter = ctx.createBiquadFilter();
-                    const gain = ctx.createGain();
-
-                    osc.type = "sine";
-                    // Dynamic math pitch based on stem
-                    osc.frequency.setValueAtTime(
-                      pianoRollSection.stem === "Bass" ? 110 : pianoRollSection.stem === "Drums" ? 180 : 380,
-                      ctx.currentTime
-                    );
-
-                    // Envelope trigger
-                    gain.gain.setValueAtTime(0.25, ctx.currentTime);
-                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.2);
-
-                    osc.connect(filter);
-                    filter.connect(gain);
-                    gain.connect(ctx.destination);
-
-                    osc.start();
-                    osc.stop(ctx.currentTime + 1.2);
-                  } catch (audioContextErr) {
-                    console.error("Synthesizer context failed:", audioContextErr);
-                  }
-                }}
-                className="bg-[#0A0A0B] border border-white/5 hover:bg-white/5 text-neutral-200 px-4 py-2 rounded-xl text-[10px] font-bold cursor-pointer transition-colors"
-              >
-                Synthesize Cue Audio
-              </button>
-              <button
-                onClick={() => setPianoRollSection(null)}
-                className="bg-red-650 text-white hover:bg-red-500 px-4 py-2 rounded-xl text-[10px] font-bold cursor-pointer transition-colors border border-white/5 hover:border-white/10"
-              >
-                Accept Pattern
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
 
       {/* FOOTER SECTION */}
       <footer className="shrink-0 border-t border-white/5 bg-[#0F1115]/80 py-4 text-center z-10 text-[9px] text-neutral-500 font-mono select-none">

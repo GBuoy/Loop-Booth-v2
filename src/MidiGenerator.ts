@@ -40,7 +40,7 @@ export function generateStemMidis(
 
     const headerChunk = new Uint8Array([
       0x4D, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06,
-      0x00, 0x01, 0x00, 0x02, // 2 tracks (1 tempo track format implicitly, or 1 multi-channel)
+      0x00, 0x00, 0x00, 0x01, // Format 0, 1 track
       0x00, ppq >> 8, ppq & 0xFF
     ]);
 
@@ -49,6 +49,9 @@ export function generateStemMidis(
     trackData.push(0x00, 0xFF, 0x51, 0x03, (tempo >> 16) & 0xFF, (tempo >> 8) & 0xFF, tempo & 0xFF);
     // Time Signature: 4/4
     trackData.push(0x00, 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08);
+
+    interface MidiEv { tick: number; data: number[]; }
+    const stemEvents: MidiEv[] = [];
 
     for (const section of tab.sections) {
       const barsInSection = section.end - section.start + 1;
@@ -60,6 +63,7 @@ export function generateStemMidis(
       const density = energy / 5;
       const chord = progression[startBar % progression.length] || [60, 64, 67];
 
+      // Procedural events
       for (let bar = 0; bar < barsInSection; bar++) {
         const absoluteBar = startBar + bar;
         const barStartTick = absoluteBar * ticksPerBar;
@@ -78,9 +82,7 @@ export function generateStemMidis(
             const index = step % chord.length;
             note = chord[index];
             velocity = 60 + (energy * 6);
-          }
-
-          if (stem.name === "MELODY") {
+          } else if (stem.name === "MELODY") {
             const chordNote = chord[Math.floor(Math.random() * chord.length)];
             const octaveOffset = energy >= 4 ? 12 : 0;
             note = chordNote + octaveOffset;
@@ -88,35 +90,23 @@ export function generateStemMidis(
             if (section.label === "Intro") velocity -= 20;
             if (section.label === "Verse") velocity -= 10;
             if (section.label === "Hook") velocity += 10;
-          }
-
-          if (stem.name === "BASS") {
+          } else if (stem.name === "BASS") {
             note = chord[0] - 24;
             if (energy >= 4 && Math.random() < 0.3) note += 12;
             velocity = 70 + (energy * 6);
-          }
-
-          if (stem.name === "DRUMS") {
+          } else if (stem.name === "DRUMS") {
             const kickSteps = [0, 8];
             const snareSteps = [4, 12];
             const hatSteps = [2, 6, 10, 14];
 
-            if (kickSteps.includes(step)) note = 36; // Kick Drum Midi Key
-            else if (snareSteps.includes(step) && energy >= 2) note = 38; // Acoustic Snare Midi Key
-            else if (hatSteps.includes(step) && energy >= 3) note = 42; // Closed Hat Midi Key
-            else if (Math.random() < 0.1 && energy >= 4) note = 46; // Open Hat
+            if (kickSteps.includes(step)) note = 36;
+            else if (snareSteps.includes(step) && energy >= 2) note = 38;
+            else if (hatSteps.includes(step) && energy >= 3) note = 42;
+            else if (Math.random() < 0.1 && energy >= 4) note = 46;
             else continue;
 
             velocity = 80 + (energy * 4);
           }
-
-          const delta = stepTick - currentTick;
-          if (delta < 0) continue;
-
-          const deltaBytes = encodeVarInt(delta);
-          trackData.push(...deltaBytes);
-          // Note On Event
-          trackData.push(0x90 + stem.channel, note, Math.min(127, velocity));
 
           let duration = ppq / 4;
           if (stem.name === "FULL") duration = ppq * 2;
@@ -124,19 +114,52 @@ export function generateStemMidis(
           else if (stem.name === "BASS" && energy >= 4) duration = ppq;
           else if (stem.name === "DRUMS") duration = ppq / 8;
 
-          const offDeltaBytes = encodeVarInt(duration);
-          trackData.push(...offDeltaBytes);
-          // Note Off Event
-          trackData.push(0x80 + stem.channel, note, 0);
+          stemEvents.push({ tick: stepTick, data: [0x90 + stem.channel, note, Math.min(127, velocity)] });
+          stemEvents.push({ tick: stepTick + duration, data: [0x80 + stem.channel, note, 0] });
+        }
+      }
 
-          currentTick = stepTick + duration;
+      // Sub-Bar Events
+      if (tab.subBarEvents && tab.subBarEvents[energyKey]) {
+        for (const ev of tab.subBarEvents[energyKey]) {
+          const sectionStartTick = startBar * ticksPerBar;
+          const evStartTick = sectionStartTick + Math.round(ev.startBeat * ppq);
+          const evEndTick = sectionStartTick + Math.round(ev.endBeat * ppq);
+
+          if (ev.type === "Note On") {
+            stemEvents.push({ tick: evStartTick, data: [0x90 + stem.channel, 60, 100] });
+            stemEvents.push({ tick: evEndTick, data: [0x80 + stem.channel, 60, 0] });
+          } else if (ev.type === "Sweep" || ev.type === "Chop") {
+            // CC 74 (Brightness/Filter)
+            stemEvents.push({ tick: evStartTick, data: [0xB0 + stem.channel, 74, 127] });
+            stemEvents.push({ tick: evEndTick, data: [0xB0 + stem.channel, 74, 0] });
+          } else if (ev.type === "Dropout" || ev.type === "Silence") {
+            // Note off / muting (CC 7)
+            stemEvents.push({ tick: evStartTick, data: [0xB0 + stem.channel, 7, 0] });
+            stemEvents.push({ tick: evEndTick, data: [0xB0 + stem.channel, 7, 100] });
+          } else if (ev.type === "Fill" || ev.type === "Re-entry") {
+            // CC marker or note burst
+            stemEvents.push({ tick: evStartTick, data: [0x90 + stem.channel, 49, 120] }); // Crash
+            stemEvents.push({ tick: evStartTick + ppq/2, data: [0x80 + stem.channel, 49, 0] });
+          }
         }
       }
     }
 
+    // Sort and emit
+    stemEvents.sort((a, b) => a.tick - b.tick);
+    
+    for (const ev of stemEvents) {
+      if (ev.tick >= currentTick) {
+         const delta = ev.tick - currentTick;
+         trackData.push(...encodeVarInt(delta));
+         trackData.push(...ev.data);
+         currentTick = ev.tick;
+      }
+    }
+
     // End of Track event
-    const finalDelta = encodeVarInt(ticksPerBar * 4 - currentTick > 0 ? ticksPerBar * 4 - currentTick : 0);
-    trackData.push(...finalDelta, 0xFF, 0x2F, 0x00);
+    trackData.push(...encodeVarInt(0), 0xFF, 0x2F, 0x00);
 
     const trackChunkHeader = new Uint8Array([0x4D, 0x54, 0x72, 0x6B]);
     const trackLength = trackData.length;

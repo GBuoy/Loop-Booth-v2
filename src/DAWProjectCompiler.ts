@@ -103,12 +103,22 @@ export function buildSequencerDAWProjectXML(
       const key = `${sec.id}-${stem}`;
       const hasLoop = tab.assignments[key] && tab.assignments[key] !== stem;
       const energy = tab.energyLevels[key] || 3;
+      
+      let subBarEventsXML = "";
+      if (tab.subBarEvents && tab.subBarEvents[key]) {
+         tab.subBarEvents[key].forEach(ev => {
+            const evStartSec = (ev.startBeat / bpm) * 60;
+            const evDurSec = ((ev.endBeat - ev.startBeat) / bpm) * 60;
+            subBarEventsXML += `          <marker time="${evStartSec.toFixed(3)}" duration="${evDurSec.toFixed(3)}" name="SubBar: ${ev.type}" />\n`;
+         });
+      }
 
       clipsXML += `      <clip id="clip-${stem}-${sec.id}" time="${startSec.toFixed(3)}" duration="${durationSec.toFixed(3)}" name="${stem} Sect ${sec.label}" color="#3b82f6">
         <metadata>
           <property name="energy_coefficient" value="${energy}" />
           <property name="assigned_loop" value="${hasLoop ? "Custom Loop File" : "Synthesized Stem"}" />
         </metadata>
+        ${subBarEventsXML ? `<markers>\n${subBarEventsXML}        </markers>` : ""}
         <notes>
           <!-- Detailed MIDI and note steps are preserved in separate bundled MIDI stems -->
         </notes>
@@ -206,6 +216,22 @@ export async function compileSequencerDAWProject(
     assignments: tab.assignments,
     energyLevels: tab.energyLevels,
     fxAssignments: tab.fxAssignments || {},
+    sub_bar_events: tab.subBarEvents ? Object.entries(tab.subBarEvents).flatMap(([key, events]) => {
+      const [secId, stem] = key.split("-");
+      const section = tab.sections.find(s => s.id === secId);
+      return (events as any[]).map(e => {
+        const startAbsoluteBeat = section ? (section.start - 1) * 4 + e.startBeat : e.startBeat;
+        const absoluteBar = Math.floor(startAbsoluteBeat / 4) + 1;
+        return {
+          section_parent: secId,
+          stem: stem,
+          event_type: e.type,
+          beat_position_start: e.startBeat,
+          beat_position_end: e.endBeat,
+          bar_number: absoluteBar
+        };
+      });
+    }) : []
   }, null, 2);
   zip.file("session_brain.json", brainJson);
 
